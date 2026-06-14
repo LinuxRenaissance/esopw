@@ -6,7 +6,7 @@
 #
 # Use it as a Steam launch option for "The Elder Scrolls Online":
 #
-#     /home/darth/Programming/ESOPW/esopw %command%
+#     ~/.local/bin/esopw %command%
 #
 # How it works:
 #   - Via %command%, Steam starts the normal ESO chain (zosSteamStarter -> launcher).

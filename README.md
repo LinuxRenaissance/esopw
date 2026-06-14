@@ -24,12 +24,13 @@ Steam still tracks the game normally (overlay, playtime), because the script
 
 ## Setup (once)
 
-1. In Steam, right-click **The Elder Scrolls Online** → **Properties**.
-2. Go to the **General** tab → **Launch Options** field.
-3. Paste exactly:
+1. Put esopw bash scrip into ~/.local/bin/ folder (create it if it's not there)
+2. In Steam, right-click **The Elder Scrolls Online** → **Properties**.
+3. Go to the **General** tab → **Launch Options** field.
+4. Type the following command:
 
    ```
-   /home/darth/Programming/ESOPW/esopw %command%
+   esopw %command%
    ```
 
 That's it. Your normal flow is unchanged:
@@ -37,6 +38,9 @@ That's it. Your normal flow is unchanged:
 - **Play** in Steam → launcher opens (and updates the game if needed).
 - **Play** in the launcher → game loads, and the launcher closes itself a few
   seconds later.
+
+Note: In some distributions ~/.local/bin/ is not in your $PATH so in those
+cases you should put the full path to the script in Steam's launch options.
 
 ## Verifying / debugging
 
