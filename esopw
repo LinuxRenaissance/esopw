@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+#
+# ESOPW - ESO Process Watcher
+#
+# Automatically closes the Bethesda launcher once the game has started.
+#
+# Use it as a Steam launch option for "The Elder Scrolls Online":
+#
+#     /home/darth/Programming/ESOPW/esopw %command%
+#
+# How it works:
+#   - Via %command%, Steam starts the normal ESO chain (zosSteamStarter -> launcher).
+#   - This script spawns a background watcher and waits for the game process
+#     (eso64.exe) to appear.
+#   - As soon as the game starts, it kills ONLY the launcher's Chromium (Cr*)
+#     processes. The game, wineserver and the rest of the wine prefix are left
+#     untouched (game and launcher share the same prefix, so the group must NOT
+#     be killed wholesale).
+#   - Steam keeps tracking the game normally (overlay, playtime), because the
+#     script exec()s the real %command% at the end.
+#
+# The watcher does NOT run permanently: it lives only for this ESO session and
+# exits as soon as it has closed the launcher, if the game never starts, or if
+# you close the launcher yourself.
+
+set -u
+
+LOG=/tmp/esopw.log
+GAME=eso64.exe                               # comm name of the game process (trigger)
+LAUNCHER_PAT='Bethesda\.net_Launcher\.exe'   # how we locate the launcher in cmdline
+SETTLE=5                                     # seconds to wait after detecting the game
+WAIT_LAUNCHER=120                            # max seconds for the launcher to appear
+SAFETY=7200                                  # hard safety limit (2h) waiting for the game
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG"; }
+
+# Find the launcher's proton pv-adverb group (ppid) via its cmdline.
+launcher_group() {
+  local p
+  for p in $(pgrep -f "$LAUNCHER_PAT" 2>/dev/null); do
+    if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q 'Bethesda.net_Launcher.exe'; then
+      ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '
+      return 0
+    fi
+  done
+  return 1
+}
+
+watcher() {
+  log "watcher start (pid $BASHPID), waiting for launcher..."
+
+  # Phase 1: wait for the launcher to appear at all.
+  local waited=0
+  until pgrep -f "$LAUNCHER_PAT" >/dev/null 2>&1; do
+    pgrep -x "$GAME" >/dev/null 2>&1 && break   # rare: game already up
+    sleep 2; waited=$((waited+2))
+    if [ "$waited" -ge "$WAIT_LAUNCHER" ]; then
+      log "launcher did not appear within ${WAIT_LAUNCHER}s - exiting."; return 0
+    fi
+  done
+  log "launcher is up, waiting for $GAME to start..."
+
+  # Phase 2: wait for the game while the launcher is alive.
+  waited=0
+  until pgrep -x "$GAME" >/dev/null 2>&1; do
+    if ! pgrep -f "$LAUNCHER_PAT" >/dev/null 2>&1; then
+      log "launcher closed without starting the game - exiting."; return 0
+    fi
+    sleep 2; waited=$((waited+2))
+    if [ "$waited" -ge "$SAFETY" ]; then
+      log "safety timeout (${SAFETY}s) - exiting."; return 0
+    fi
+  done
+  log "$GAME detected (pid $(pgrep -x "$GAME" | tr '\n' ' ')); waiting ${SETTLE}s before closing."
+  sleep "$SETTLE"
+
+  # Find the launcher's proton group and kill its Chromium processes.
+  local grp
+  grp=$(launcher_group) || { log "launcher gone before close - done."; return 0; }
+  log "launcher proton group ppid=$grp"
+
+  local pids
+  pids=$(ps -eo pid,ppid,comm | awk -v g="$grp" '$2==g && $3 ~ /^Cr/ {print $1}')
+  if [ -z "$pids" ]; then log "no Cr* processes in group - done."; return 0; fi
+  log "TERM launcher pids: $(echo $pids)"
+  kill -TERM $pids 2>/dev/null
+  sleep 4
+
+  # Whatever survives gets SIGKILL.
+  pids=$(ps -eo pid,ppid,comm | awk -v g="$grp" '$2==g && $3 ~ /^Cr/ {print $1}')
+  if [ -n "$pids" ]; then log "KILL leftovers: $(echo $pids)"; kill -KILL $pids 2>/dev/null; fi
+
+  if pgrep -x "$GAME" >/dev/null 2>&1; then
+    log "OK: launcher closed, $GAME still running."
+  else
+    log "WARNING: $GAME no longer running after closing the launcher!"
+  fi
+}
+
+# --- main ---------------------------------------------------------------
+log "=== new session; cmd: $* ==="
+watcher & disown                     # background watcher, independent of the game
+exec "$@"                            # run the real Steam %command%
